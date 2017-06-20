@@ -25,10 +25,10 @@ type client struct {
 	tp transport.Transport
 }
 {{ range .Methods }}
-func (c *client) {{ .Name }}(ctx context.Context, req *{{ .Request.Type }}) (*{{ .Response.Type }}, error) {
+func (c *client) {{ .Name }}(ctx context.Context, req *{{ .Request.Type }}, opts ...transport.RequestOption) (*{{ .Response.Type }}, error) {
   var rep {{ .Response.Type }}
 
-  _, err := c.tp.Request({{ .Topic }}, req, &rep)
+  _, err := c.tp.Request({{ .Topic }}, req, &rep, opts...)
   if err != nil {
     return nil, err
   }
