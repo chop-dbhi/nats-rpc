@@ -2,6 +2,12 @@
 
 `go generate` command for creating a client interface, CLI, and serve function for a service interface.
 
+## Install
+
+```
+go get github.com/chop-dbhi/nats-rpc/...
+```
+
 ## Usage
 
 ```go
