@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+// Message is the envelope/wrapper for all messages.
+message Message {
+  // ID is a globally unique message.
+  string id = 1;
+
+  // Timestamp is the timestamp in nanoseconds with the message was published.
+  uint64 timestamp = 2;
+
+  // Payload is the actual payload being published that will be consumed.
+  // This is expected to use protobuf encoding.
+  bytes payload = 3;
+
+  // Error will be populated if an error occurs within a subscription handler.
+  string error = 4;
+
+  // Cause is the ID of a message that resulted in this message being published.
+  string cause = 5;
+
+  // Subject is the subject the message is published.
+  string subject = 6;
+
+  // Queue is the queue this message was received by.
+  string queue = 7;
+
+  // Reply is the inbox ID of the publisher of this message.
+  string reply = 8;
+}

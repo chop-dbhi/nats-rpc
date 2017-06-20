@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package example;
+
+
+message Req {
+  int32 left = 1;
+  int32 right = 2;
+}
+
+message Rep {
+  int32 sum = 1;
+}
