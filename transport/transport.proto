@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+package transport;
+
 // Message is the envelope/wrapper for all messages.
 message Message {
   // ID is a globally unique message.
