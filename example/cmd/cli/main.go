@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"github.com/chop-dbhi/nats-rpc/example"
+
 	"github.com/chop-dbhi/nats-rpc/log"
 	"github.com/chop-dbhi/nats-rpc/transport"
 	"github.com/golang/protobuf/jsonpb"
@@ -24,8 +25,6 @@ const (
 
 var (
 	buildVersion string
-
-	traceIdKey = struct{}{}
 
 	jsonMarshaler = &jsonpb.Marshaler{
 		EmitDefaults: true,
@@ -88,18 +87,17 @@ func main() {
 
 	inpr := bytes.NewBufferString(inp)
 
-	client := example.NewClient(tp)
-
 	var rep proto.Message
 	ctx := context.Background()
 
 	switch meth {
-	case "Add":
+	case "Sum":
+		client := example.NewServiceClient(tp)
 		var req example.Req
 		if err := jsonUnmarshaler.Unmarshal(inpr, &req); err != nil {
 			log.Fatalf("json: %s", err)
 		}
-		rep, err = client.Add(ctx, &req)
+		rep, err = client.Sum(ctx, &req)
 
 	default:
 		log.Fatalf("unknown method %s", meth)

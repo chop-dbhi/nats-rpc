@@ -4,34 +4,67 @@
 
 ## Install
 
+This requires the [Protobuf Compiler](https://developers.google.com/protocol-buffers/) to be installed.
+
+Install the library and protobuf plugins.
+
 ```
 go get github.com/chop-dbhi/nats-rpc/...
+go get github.com/chop-dbhi/nats-rpc/cmd/nats-rpc
+
+# Optional for generating a CLI.
+go get github.com/chop-dbhi/nats-rpc/cmd/nats-rpc-cli
 ```
 
 ## Usage
 
-```go
-//go:generate nats-rpc -type=Service -client=client.go -cli=./cmd/cli/main.go
-package main
+Create a protobuf file with a service definition.
 
-type Req struct {
-  Left int
-  Right int
+```proto
+syntax = "proto3";
+
+package example;
+
+message Req {
+  int32 left = 1;
+  int32 right = 2;
 }
 
-type Rep struct {
-  Sum int
+message Rep {
+  int32 sum = 1;
 }
 
-type Service interface {
-  Add(context.Context, *Req) (*Rep, error)
+service Service {
+  rpc Sum (Req) returns (Rep);
 }
 ```
 
-## Options
+Then run:
 
-- `type` - Name of the service interface type. All methods are expected to have the same signature. `(context.Context, <RequestType>) (<ResponseType>, error)` where the request and response types can be user-defined.
-- `client` - Name of the output file to write the client type and serve function.
-- `cli` - Name of the output file to write the CLI.
-- `group` - Name of the NATS queue group for the serve subscription handlers. Defaults to `svc.<pkg-name>`.
-- `prefix` - Prefix to all NATS subjects used. Defaults to no prefix.
+```
+protoc --go_out=. service.proto
+protoc --plugin=protoc-gen-custom="$GOPATH/bin/nats-rpc" --custom_out=. service.proto
+# Optional for generating a CLI.
+protoc --plugin=protoc-gen-custom="$GOPATH/bin/nats-rpc-cli" --custom_out=cmd/cli service.proto
+```
+
+See the [example](./example) package for the full example and generated output.
+
+`service.go` contains the implementation of `Service` and `cmd/service/main.go` contains the executable code to run.
+
+With a NATS server running on 127.0.0.1:4222, in one terminal run the server.
+
+```
+go run ./cmd/service/main.go
+```
+
+In the other, try the CLI:
+
+```
+go run ./cmd/cli/main.go Sum '{"left": 5, "right": 10}'
+{"sum":15}
+```
+
+## License
+
+MIT

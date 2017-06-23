@@ -1,124 +1,145 @@
-package main
+package natsrpc
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
-	"go/ast"
 	"go/build"
-	"go/importer"
-	"go/parser"
-	"go/token"
-	"go/types"
+	"go/format"
 	"path/filepath"
 	"strings"
+	"text/template"
+
+	"github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"github.com/golang/protobuf/protoc-gen-go/plugin"
 )
 
-func defaultImporter() types.Importer {
-	return importer.Default()
-}
-
-// prefixDirectory places the directory name on the beginning of each name in the list.
-func prefixDirectory(directory string, names []string) []string {
-	if directory == "." {
-		return names
+func stringPtr(in string) *string {
+	if in == "" {
+		return nil
 	}
 
-	ret := make([]string, len(names))
-	for i, name := range names {
-		ret[i] = filepath.Join(directory, name)
+	return &in
+}
+
+func outName(in *descriptor.FileDescriptorProto) string {
+	if in.Name != nil {
+		name := *in.Name
+		ext := filepath.Ext(name)
+		name = name[0 : len(name)-len(ext)]
+		return name + ".pb.nats.go"
 	}
 
-	return ret
+	return "service.pb.nats.go"
 }
 
-// File holds a single parsed file and associated data.
-type File struct {
-	pkg *Package
-	// Parsed AST.
-	file *ast.File
-}
-
-type Package struct {
-	dir   string
-	name  string
-	files []*File
-	// objects defined in the AST.
-	defs     map[*ast.Ident]types.Object
-	typesPkg *types.Package
-}
-
-// check type-checks the package. The package must be OK to proceed.
-func (p *Package) check(fs *token.FileSet, astFiles []*ast.File) error {
-	p.defs = make(map[*ast.Ident]types.Object)
-
-	config := types.Config{Importer: defaultImporter(), FakeImportC: true}
-	info := &types.Info{
-		Defs: p.defs,
+// packageName determines the name of the package.
+func packageName(in *descriptor.FileDescriptorProto) (string, error) {
+	if in.Package != nil {
+		return *in.Package, nil
 	}
 
-	typesPkg, err := config.Check(p.dir, fs, astFiles, info)
+	if in.Name != nil {
+		name := *in.Name
+		ext := filepath.Ext(name)
+		return name[0 : len(name)-len(ext)], nil
+	}
+
+	return "", errors.New("unable to determine package name")
+}
+
+func packagePath(in *descriptor.FileDescriptorProto) (string, error) {
+	goPath := filepath.Join(build.Default.GOPATH, "src")
+
+	fpath, err := filepath.Abs(*in.Name)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	p.typesPkg = typesPkg
-	return nil
+	return filepath.Rel(goPath, filepath.Dir(fpath))
 }
 
-// ParsePackageDir parses the package residing in the directory.
-func ParsePackageDir(d string) (*Package, error) {
-	pkg, err := build.Default.ImportDir(d, 0)
-	if err != nil {
-		return nil, fmt.Errorf("cannot process directory %s: %s", d, err)
+// base and lower are template helper functions.
+func newTemplate(content string) (*template.Template, error) {
+	fn := map[string]interface{}{
+		"base": func(in string) string {
+			idx := strings.LastIndex(in, ".")
+			if idx == -1 {
+				return in
+			}
+			return in[idx+1:]
+		},
+		"lower": strings.ToLower,
 	}
 
-	var names []string
-
-	names = append(names, pkg.GoFiles...)
-	names = prefixDirectory(d, names)
-
-	return parsePackage(d, names, nil)
+	return template.New("page").Funcs(fn).Parse(content)
 }
 
-// parsePackage analyzes the single package constructed from the named files.
-// If text is non-nil, it is a string to be used instead of the content of the file,
-// to be used for testing. parsePackage exits if there is an error.
-func parsePackage(directory string, names []string, text interface{}) (*Package, error) {
-	var (
-		pkg      Package
-		astFiles []*ast.File
-	)
+type service struct {
+	Pkg     string
+	PkgPath string
+	Name    string
+	Methods []*method
+}
 
-	fs := token.NewFileSet()
+type method struct {
+	Name       string
+	Topic      string
+	InputType  string
+	OutputType string
+}
 
-	for _, name := range names {
-		if !strings.HasSuffix(name, ".go") {
-			continue
-		}
-
-		parsedFile, err := parser.ParseFile(fs, name, text, 0)
-		if err != nil {
-			return nil, err
-		}
-
-		astFiles = append(astFiles, parsedFile)
-		pkg.files = append(pkg.files, &File{
-			file: parsedFile,
-			pkg:  &pkg,
-		})
+func ParseFile(in *descriptor.FileDescriptorProto, out, tmpl string) (*plugin_go.CodeGeneratorResponse_File, error) {
+	if len(in.Service) != 1 {
+		return nil, errors.New("exactly one sevice must be defined")
 	}
 
-	if len(astFiles) == 0 {
-		return nil, fmt.Errorf("%s: no buildable Go files", directory)
+	if out == "" {
+		out = outName(in)
 	}
 
-	pkg.name = astFiles[0].Name.Name
-	pkg.dir = directory
-
-	// Type check the package.
-	err := pkg.check(fs, astFiles)
+	pkg, err := packageName(in)
 	if err != nil {
 		return nil, err
 	}
 
-	return &pkg, nil
+	pkgPath, err := packagePath(in)
+	if err != nil {
+		return nil, err
+	}
+
+	sp := in.Service[0]
+
+	sd := &service{
+		Pkg:     pkg,
+		PkgPath: pkgPath,
+		Name:    sp.GetName(),
+	}
+
+	for _, m := range sp.Method {
+		sd.Methods = append(sd.Methods, &method{
+			Name:       m.GetName(),
+			Topic:      fmt.Sprintf("%s.%s", pkg, m.GetName()), // TODO: support alternate prefix
+			InputType:  m.GetInputType(),
+			OutputType: m.GetOutputType(),
+		})
+	}
+
+	buf := bytes.NewBuffer(nil)
+	t, err := newTemplate(tmpl)
+	if err != nil {
+		return nil, err
+	}
+
+	t.Execute(buf, sd)
+
+	src, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	return &plugin_go.CodeGeneratorResponse_File{
+		Name:    stringPtr(out),
+		Content: stringPtr(string(src)),
+	}, nil
 }

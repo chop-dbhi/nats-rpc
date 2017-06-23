@@ -1,8 +1,15 @@
-//go:generate nats-rpc -type=Service -client=client.go -cli=./cmd/cli/main.go
 package example
 
 import "context"
 
-type Service interface {
-	Add(context.Context, *Req) (*Rep, error)
+type service struct{}
+
+func (s *service) Sum(ctx context.Context, req *Req) (*Rep, error) {
+	return &Rep{
+		Sum: req.Left + req.Right,
+	}, nil
+}
+
+func NewService() Service {
+	return &service{}
 }
