@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package transport;
 
+import "google/rpc/status.proto";
+
 // Message is the envelope/wrapper for all messages.
 message Message {
   // ID is a globally unique message.
@@ -14,7 +16,7 @@ message Message {
   // This is expected to use protobuf encoding.
   bytes payload = 3;
 
-  // Error will be populated if an error occurs within a subscription handler.
+  // Deprecated. Use status instead.
   string error = 4;
 
   // Cause is the ID of a message that resulted in this message being published.
@@ -28,4 +30,7 @@ message Message {
 
   // Reply is the inbox ID of the publisher of this message.
   string reply = 8;
+
+  // Error that occurs in during transport or in the application.
+  google.rpc.Status status = 9;
 }
