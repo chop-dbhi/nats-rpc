@@ -6,6 +6,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/nats-io/go-nats"
 	"github.com/nats-io/nuid"
@@ -74,7 +77,7 @@ func (m *Message) Decode(pb proto.Message) error {
 // Handler is the handler used by a subscriber. The return value may be nil if
 // no output is yielded. If this is a request, the reply will be sent automatically
 // with the reply value or an error if one occurred. If a reply is not expected
-// and error occurs, it will be logged.
+// and error occurs, it will be logged. The error can be inspected using status.FromError.
 type Handler func(msg *Message) (proto.Message, error)
 
 // Transport describes the interface
@@ -86,8 +89,7 @@ type Transport interface {
 
 	// Request publishes a message synchronously and waits for a response that
 	// is decoded into the Protobuf message supplied. The wrapped message is
-	// returned or an error. The error could be a connection error, timeout,
-	// or a consumer error.
+	// returned or an error. The error can inspected using status.FromError.
 	Request(sub string, req proto.Message, rep proto.Message, opts ...RequestOption) (*Message, error)
 
 	// Subscribe creates a subscription to a subject.
@@ -150,6 +152,7 @@ func (c *transport) Close() {
 	c.conn.Close()
 }
 
+// TODO: define as part of an Encoder interface.
 func (c *transport) wrap(payload proto.Message) (*Message, error) {
 	var (
 		pb  []byte
@@ -175,6 +178,7 @@ func (c *transport) wrap(payload proto.Message) (*Message, error) {
 	return &msg, nil
 }
 
+// TODO: define as part of a Decoder interface.
 func (c *transport) unwrap(nmsg *nats.Msg) (*Message, error) {
 	var msg Message
 
@@ -197,6 +201,7 @@ func (c *transport) Publish(sub string, msg proto.Message, opts ...PublishOption
 		opt(pubOpts)
 	}
 
+	// TODO: use encoder
 	m, err := c.wrap(msg)
 	if err != nil {
 		return nil, err
@@ -240,6 +245,7 @@ func (c *transport) Request(sub string, req proto.Message, rep proto.Message, op
 		return nil, err
 	}
 
+	// Send request.
 	nm, err := c.conn.Request(sub, mb, reqOpts.Timeout)
 	if err != nil {
 		return nil, err
@@ -250,8 +256,19 @@ func (c *transport) Request(sub string, req proto.Message, rep proto.Message, op
 		return nil, err
 	}
 
-	// Error occurred in the handler.
-	if m.Error != "" {
+	// If older transport code is being used with the new message format
+	// status could be nil.
+	if m.Status != nil {
+		sts := status.FromProto(m.Status)
+
+		// Error will be nil if code is OK.
+		if err := sts.Err(); err != nil {
+			return nil, err
+		}
+
+		// Deprecated.
+		// Error occurred in the handler.
+	} else if m.Error != "" {
 		return nil, errors.New(m.Error)
 	}
 
@@ -264,6 +281,21 @@ func (c *transport) Request(sub string, req proto.Message, rep proto.Message, op
 	return m, nil
 }
 
+// errorStatus takes an error and returns the internal status or wraps it.
+func errorStatus(err error) *status.Status {
+	if err == nil {
+		return status.New(codes.OK, "")
+	}
+
+	// Check if this is a valid status, otherwise convert to one.
+	sts, ok := status.FromError(err)
+	if !ok {
+		sts = status.New(codes.Unknown, err.Error())
+	}
+
+	return sts
+}
+
 // Subscribe creates a subscription to a subject.
 func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption) (*nats.Subscription, error) {
 	subOpts := &SubscribeOptions{}
@@ -274,10 +306,9 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 	}
 
 	// Replies to the recipient with an error if applicable.
-	replyWithError := func(logger *zap.Logger, msg *Message, srcErr error) {
+	replyWithError := func(logger *zap.Logger, msg *Message, sts *status.Status) {
 		rmsg, err := c.wrap(nil)
-		// If an error occurs, this is a bug since this only relies on the local
-		// Message protobuf definition.
+		// If this fails, this is a bug.
 		if err != nil {
 			logger.Error("failed to create transport message",
 				zap.Error(err),
@@ -287,8 +318,11 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 
 		rmsg.Cause = msg.Id
 		rmsg.Subject = msg.Reply
-		rmsg.Error = srcErr.Error()
+		rmsg.Status = sts.Proto()
+		// Backwards compatibility for older transports consuming new messages.
+		rmsg.Error = sts.Err().Error()
 
+		// If this fails, this is a bug.
 		mb, err := proto.Marshal(rmsg)
 		if err != nil {
 			logger.Error("failed to marshal transport message",
@@ -304,7 +338,9 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 		}
 	}
 
-	// NATS message handler.
+	// NATS message handler. At this point the message has been sent over
+	// the wire and received, so any errors should be wrapped using an appropriate
+	// status code.
 	natsHandler := func(nmsg *nats.Msg) {
 		// Copy logger for this request.
 		logger := c.logger.With(
@@ -312,18 +348,20 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 			zap.String("msg.reply", nmsg.Reply),
 		)
 
+		// Failed to decode message.
 		msg, err := c.unwrap(nmsg)
 
 		// Failed unwrap which means the message is likely in the wrong format.
 		// A reply is ignored if this occurs since if the sent message was invalid
 		// it is unlikely the requester will be able to parse the message in the
 		// same format. Instead we log this case.
+		// TODO: reply with error.
 		if err != nil {
 			logger.Error("failed to decode nats message")
 			return
 		}
 
-		// Add more context.
+		// Add more context now that wrapped message has been decoded.
 		logger = c.logger.With(
 			zap.String("trace.id", msg.Id),
 			zap.String("msg.id", msg.Id),
@@ -333,7 +371,9 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 		// In case the handler panics, catch and log.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err := fmt.Errorf("recovered subscription handler panic:\n%s", rec)
+				// Wrap as error since its not clear what the value of the
+				// recovered value is.
+				err := fmt.Errorf("%s", rec)
 
 				if msg.Reply == "" {
 					logger.Error("subscription handler panic",
@@ -342,11 +382,12 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 					return
 				}
 
-				replyWithError(logger, msg, err)
+				sts := errorStatus(err)
+				replyWithError(logger, msg, sts)
 			}
 		}()
 
-		// Pass to handler.
+		// Pass message to handler.
 		resp, err := hdlr(msg)
 
 		// Log error only if no reply.
@@ -363,7 +404,8 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 		// business logic and will reply with the error. The handler itself should
 		// have logged the error if it occurred since it can provide context.
 		if err != nil {
-			replyWithError(logger, msg, err)
+			sts := errorStatus(err)
+			replyWithError(logger, msg, sts)
 			return
 		}
 
@@ -376,14 +418,16 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 				zap.Error(err),
 			)
 
-			replyWithError(logger, msg, err)
+			sts := errorStatus(err)
+			replyWithError(logger, msg, sts)
 			return
 		}
 
 		rmsg.Cause = msg.Id
 		rmsg.Subject = msg.Reply
+		rmsg.Status = status.New(codes.OK, "").Proto()
 
-		// Bug.
+		// If this fails, this is a bug.
 		mb, err := proto.Marshal(rmsg)
 		if err != nil {
 			logger.Error("failed to marshal transport message",
@@ -392,6 +436,7 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 			return
 		}
 
+		// If NATS is not responding, just log it.
 		if err := c.conn.Publish(msg.Reply, mb); err != nil {
 			logger.Error("failed to publish nats message",
 				zap.Error(err),
@@ -405,6 +450,7 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 		if err != nil {
 			return nil, err
 		}
+
 		c.mux.Lock()
 		c.subs = append(c.subs, s)
 		c.mux.Unlock()
@@ -416,6 +462,7 @@ func (c *transport) Subscribe(sub string, hdlr Handler, opts ...SubscribeOption)
 	if err != nil {
 		return nil, err
 	}
+
 	c.mux.Lock()
 	c.subs = append(c.subs, s)
 	c.mux.Unlock()

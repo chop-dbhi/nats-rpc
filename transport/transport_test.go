@@ -5,6 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/nats-io/go-nats"
 	"github.com/nats-io/nuid"
@@ -113,6 +116,7 @@ func TestRequest(t *testing.T) {
 			t.Errorf("expected foobar, got %s", cmsg.Cause)
 		}
 
+		// Return a fixed message.
 		return exp, nil
 	}
 
@@ -122,7 +126,7 @@ func TestRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send request.
+	// Send request. The decoded message is expected to be equal to `exp`.
 	var rep Message
 	_, err = tp.Request("_transport", nil, &rep, RequestCause("foobar"))
 	if err != nil {
@@ -130,7 +134,7 @@ func TestRequest(t *testing.T) {
 	}
 
 	if rep.Id != exp.Id {
-		t.Error("reply ids differ")
+		t.Errorf("expected reply id %s, got %s", exp.Id, rep.Id)
 	}
 }
 
@@ -152,6 +156,46 @@ func TestHandlerPanic(t *testing.T) {
 	var rep Message
 	_, err = tp.Request("_transport", nil, &rep)
 	if err == nil {
-		t.Errorf("expected error")
+		t.Fatal("expected error")
+		return
+	}
+
+	sts, ok := status.FromError(err)
+	if !ok {
+		t.Fatal("expected status type")
+	}
+
+	if sts.Code() != codes.Unknown {
+		t.Fatalf("expected %s code, got %s", codes.Unknown, sts.Code())
+	}
+}
+
+func TestCustomError(t *testing.T) {
+	tp := newTransport(t)
+	defer tp.Close()
+
+	hdlr := func(_ *Message) (proto.Message, error) {
+		return nil, status.Error(codes.NotFound, "entity not found")
+	}
+
+	_, err := tp.Subscribe("_transport", hdlr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var rep Message
+	_, err = tp.Request("_transport", nil, &rep)
+	if err == nil {
+		t.Fatal("expected error")
+		return
+	}
+
+	sts, ok := status.FromError(err)
+	if !ok {
+		t.Fatal("expected status type")
+	}
+
+	if sts.Code() != codes.NotFound {
+		t.Fatalf("expected %s code, got %s", codes.NotFound, sts.Code())
 	}
 }

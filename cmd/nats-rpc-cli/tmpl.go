@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/nats-io/go-nats"
 
+	"google.golang.org/grpc/status"
 	"go.uber.org/zap"
 )
 
@@ -109,7 +111,16 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatalf("rpc error: %s", err)
+		if sts, ok := status.FromError(err); ok {
+			out := map[string]interface{}{
+				"code": sts.Code().String(),
+				"message": sts.Message(),
+			}
+			if err := json.NewEncoder(os.Stderr).Encode(out); err != nil {
+				log.Fatalf("error encoding error: %s", err)
+			}
+		}
+		os.Exit(1)
 	}
 
 	if err := jsonMarshaler.Marshal(os.Stdout, rep); err != nil {
