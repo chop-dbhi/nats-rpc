@@ -70,12 +70,11 @@ Two parameters are supported for both commands. Parameters are supplied as a set
 protoc --nats-rpc_out=param1=value1,param2=value2:. service.proto
 ```
 
-`subject` - A Go template string that enables customizing the generated NATS subjects per method. Supported template parameters include:
+`subject` - A Go template string that enables customizing the generated NATS subject prefix. Supported template parameters include:
   - `{{.Pkg}}` - The name of the package defined in the proto file.
   - `{{.Service}}` - The name of the service type being generated for.
-  - `{{.Method}}` - The name of the method the subject corresponds to.
 
-The default subject template is `{{.Pkg}}.{{.Method}}`.
+A subject is produced per method defined on the service and will be appended to this subject prefix in the code. The default subject prefix template is `{{.Pkg}}`.
 
 `outfile` - The name of the output file.
 

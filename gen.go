@@ -79,6 +79,7 @@ type service struct {
 	Pkg     string
 	PkgPath string
 	Name    string
+	Subject string
 	Methods []*method
 }
 
@@ -92,7 +93,6 @@ type method struct {
 type subjectParams struct {
 	Pkg     string
 	Service string
-	Method  string
 }
 
 type Options struct {
@@ -126,17 +126,10 @@ func ParseFile(in *descriptor.FileDescriptorProto, tmpl string, opts Options) (*
 
 	// Parse subject template.
 	if opts.Subject == "" {
-		opts.Subject = "{{.Pkg}}.{{.Method}}"
+		opts.Subject = "{{.Pkg}}"
 	}
 
-	subjectTmpl, err := template.New("subject").Parse(opts.Subject)
-	if err != nil {
-		return nil, err
-	}
-
-	if opts.OutFile == "" {
-		opts.OutFile = outName(in)
-	}
+	sp := in.Service[0]
 
 	pkg, err := packageName(in)
 	if err != nil {
@@ -148,29 +141,36 @@ func ParseFile(in *descriptor.FileDescriptorProto, tmpl string, opts Options) (*
 		return nil, err
 	}
 
-	sp := in.Service[0]
+	subjectTmpl, err := template.New("subject").Parse(opts.Subject)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.NewBuffer(nil)
+	err = subjectTmpl.Execute(buf, &subjectParams{
+		Pkg:     pkg,
+		Service: sp.GetName(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	subject := buf.String()
+
+	if opts.OutFile == "" {
+		opts.OutFile = outName(in)
+	}
 
 	sd := &service{
 		Pkg:     pkg,
 		PkgPath: pkgPath,
+		Subject: subject,
 		Name:    sp.GetName(),
 	}
 
-	buf := bytes.NewBuffer(nil)
 	for _, m := range sp.Method {
-		buf.Reset()
-		err := subjectTmpl.Execute(buf, &subjectParams{
-			Pkg:     pkg,
-			Service: sd.Name,
-			Method:  m.GetName(),
-		})
-		if err != nil {
-			return nil, err
-		}
-
 		sd.Methods = append(sd.Methods, &method{
 			Name:       m.GetName(),
-			Topic:      buf.String(),
+			Topic:      fmt.Sprintf("%s.%s", subject, m.GetName()),
 			InputType:  m.GetInputType(),
 			OutputType: m.GetOutputType(),
 		})

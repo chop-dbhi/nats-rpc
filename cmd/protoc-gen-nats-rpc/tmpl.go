@@ -8,12 +8,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/chop-dbhi/nats-rpc"
 	"github.com/chop-dbhi/nats-rpc/transport"
 	"github.com/golang/protobuf/proto"
-)
-
-var (
-	traceIdKey = struct{}{}
 )
 
 type {{ .Name }} interface {
@@ -59,25 +59,25 @@ func New{{ .Name }}Server(tp transport.Transport, svc {{ .Name }}) *{{ .Name }}S
 
 func (s *{{ .Name }}Server) Serve(ctx context.Context, opts ...transport.SubscribeOption) error {
 	ctx, cancel := context.WithCancel(ctx)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
 	var err error
-	{{ range .Methods }}
-	_, err = s.tp.Subscribe("{{ .Topic }}", func(msg *transport.Message) (proto.Message, error) {
-		ctx := context.WithValue(ctx, traceIdKey, msg.Id)
-
-		var req {{ .InputType | base }}
-		if err := msg.Decode(&req); err != nil {
-			return nil, err
+	_, err = s.tp.Subscribe("{{ .Subject }}.>", func(msg *transport.Message) (proto.Message, error) {
+		switch msg.Subject { {{ range .Methods }}
+		case "{{.Topic}}":
+			var req {{ .InputType | base }}
+			if err := msg.Decode(&req); err != nil {
+				return nil, err
+			}
+			return s.svc.{{ .Name }}(ctx, &req)
+		{{ end }}
+		default:
+			return nil, status.Error(codes.Unimplemented, "")
 		}
-
-		return s.svc.{{ .Name }}(ctx, &req)
 	}, opts...)
 	if err != nil {
 		return err
-	}{{ end }}
+	}
 
 	sigchan := make(chan os.Signal)
 	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
