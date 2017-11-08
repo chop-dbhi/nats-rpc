@@ -14,8 +14,8 @@ build:
 
 	go build \
 		-ldflags "-X \"main.buildVersion=$(GIT_VERSION)\" -extldflags -static" \
-		-o ./dist/$(GOOS)-$(GOARCH)/$(PROG_NAME) ./cmd/nats-rpc
+		-o ./dist/$(GOOS)-$(GOARCH)/$(PROG_NAME) ./cmd/protoc-gen-nats-rpc
 
 	go build \
 		-ldflags "-X \"main.buildVersion=$(GIT_VERSION)\" -extldflags -static" \
-		-o ./dist/$(GOOS)-$(GOARCH)/$(PROG_NAME)-cli ./cmd/nats-rpc-cli
+		-o ./dist/$(GOOS)-$(GOARCH)/$(PROG_NAME)-cli ./cmd/protoc-gen-nats-rpc-cli
