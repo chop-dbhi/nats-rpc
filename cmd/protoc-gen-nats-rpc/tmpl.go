@@ -16,20 +16,19 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
-type {{ .Name }} interface {
+type Service interface {
 {{ range .Methods }}	{{ .Name }}(context.Context, *{{ .InputType | base }}) (*{{ .OutputType | base}}, error)
 {{ end }}}
 
-type {{ .Name }}Client interface {
+type Client interface {
 {{ range .Methods }}	{{ .Name }}(context.Context, *{{ .InputType | base }}, ...transport.RequestOption) (*{{ .OutputType | base}}, error)
 {{ end }}}
 
-// {{ .Name | lower }}Client an implementation of {{ .Name }} client.
-type {{ .Name | lower }}Client struct {
+// client is an implementation of Client.
+type client struct {
 	tp transport.Transport
 }
-{{ $Service := .Name }}
-{{ range .Methods }}func (c *{{ $Service | lower}}Client) {{ .Name }}(ctx context.Context, req *{{ .InputType | base }}, opts ...transport.RequestOption) (*{{ .OutputType | base}}, error) {
+{{ range .Methods }}func (c *client) {{ .Name }}(ctx context.Context, req *{{ .InputType | base }}, opts ...transport.RequestOption) (*{{ .OutputType | base}}, error) {
 	var rep {{ .OutputType | base }}
 	
 	_, err := c.tp.Request("{{ .Topic }}", req, &rep, opts...)
@@ -40,24 +39,17 @@ type {{ .Name | lower }}Client struct {
 	return &rep, nil
 }
 
-{{ end }}// New{{ .Name }}Client creates a new {{ .Name }} client.
-func New{{ .Name }}Client(tp transport.Transport) {{ .Name }}Client {
-	return &{{ .Name | lower }}Client{tp}
+{{ end }}// NewClient creates a new {{ .Name }} client.
+func NewClient(tp transport.Transport) Client {
+	return &client{tp}
 }
 
-type {{ .Name }}Server struct {
+type server struct {
 	tp  transport.Transport
 	svc {{ .Name }}
 }
 
-func New{{ .Name }}Server(tp transport.Transport, svc {{ .Name }}) *{{ .Name }}Server {
-	return &{{ .Name }}Server{
-		tp:  tp,
-		svc: svc,
-	}
-}
-
-func (s *{{ .Name }}Server) Serve(ctx context.Context, opts ...transport.SubscribeOption) error {
+func (s *server) Serve(ctx context.Context, opts ...transport.SubscribeOption) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -85,5 +77,12 @@ func (s *{{ .Name }}Server) Serve(ctx context.Context, opts ...transport.Subscri
 	<-sigchan
 
 	return nil
+}
+
+func NewServer(tp transport.Transport, svc {{ .Name }}) natsrpc.Server {
+	return &server{
+		tp:  tp,
+		svc: svc,
+	}
 }
 `
