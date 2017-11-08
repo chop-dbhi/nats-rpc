@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/chop-dbhi/nats-rpc/example"
 
@@ -92,9 +93,9 @@ func main() {
 	var rep proto.Message
 	ctx := context.Background()
 
-	switch meth {
-	case "Sum":
-		client := example.NewServiceClient(tp)
+	switch strings.ToLower(meth) {
+	case "sum":
+		client := example.NewClient(tp)
 		var req example.Req
 		if err := jsonUnmarshaler.Unmarshal(inpr, &req); err != nil {
 			log.Fatalf("json: %s", err)
@@ -115,7 +116,7 @@ func main() {
 				log.Fatalf("error encoding error: %s", err)
 			}
 		}
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	if err := jsonMarshaler.Marshal(os.Stdout, rep); err != nil {

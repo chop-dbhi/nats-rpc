@@ -6,28 +6,28 @@ import (
 	"os/signal"
 	"syscall"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/chop-dbhi/nats-rpc"
 	"github.com/chop-dbhi/nats-rpc/transport"
 	"github.com/golang/protobuf/proto"
-)
-
-var (
-	traceIdKey = struct{}{}
 )
 
 type Service interface {
 	Sum(context.Context, *Req) (*Rep, error)
 }
 
-type ServiceClient interface {
+type Client interface {
 	Sum(context.Context, *Req, ...transport.RequestOption) (*Rep, error)
 }
 
-// serviceClient an implementation of Service client.
-type serviceClient struct {
+// client is an implementation of Client.
+type client struct {
 	tp transport.Transport
 }
 
-func (c *serviceClient) Sum(ctx context.Context, req *Req, opts ...transport.RequestOption) (*Rep, error) {
+func (c *client) Sum(ctx context.Context, req *Req, opts ...transport.RequestOption) (*Rep, error) {
 	var rep Rep
 
 	_, err := c.tp.Request("example.Sum", req, &rep, opts...)
@@ -38,40 +38,33 @@ func (c *serviceClient) Sum(ctx context.Context, req *Req, opts ...transport.Req
 	return &rep, nil
 }
 
-// NewServiceClient creates a new Service client.
-func NewServiceClient(tp transport.Transport) ServiceClient {
-	return &serviceClient{tp}
+// NewClient creates a new Service client.
+func NewClient(tp transport.Transport) Client {
+	return &client{tp}
 }
 
-type ServiceServer struct {
+type server struct {
 	tp  transport.Transport
 	svc Service
 }
 
-func NewServiceServer(tp transport.Transport, svc Service) *ServiceServer {
-	return &ServiceServer{
-		tp:  tp,
-		svc: svc,
-	}
-}
-
-func (s *ServiceServer) Serve(ctx context.Context, opts ...transport.SubscribeOption) error {
+func (s *server) Serve(ctx context.Context, opts ...transport.SubscribeOption) error {
 	ctx, cancel := context.WithCancel(ctx)
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
 	var err error
+	_, err = s.tp.Subscribe("example.>", func(msg *transport.Message) (proto.Message, error) {
+		switch msg.Subject {
+		case "example.Sum":
+			var req Req
+			if err := msg.Decode(&req); err != nil {
+				return nil, err
+			}
+			return s.svc.Sum(ctx, &req)
 
-	_, err = s.tp.Subscribe("example.Sum", func(msg *transport.Message) (proto.Message, error) {
-		ctx := context.WithValue(ctx, traceIdKey, msg.Id)
-
-		var req Req
-		if err := msg.Decode(&req); err != nil {
-			return nil, err
+		default:
+			return nil, status.Error(codes.Unimplemented, "")
 		}
-
-		return s.svc.Sum(ctx, &req)
 	}, opts...)
 	if err != nil {
 		return err
@@ -83,4 +76,11 @@ func (s *ServiceServer) Serve(ctx context.Context, opts ...transport.SubscribeOp
 	<-sigchan
 
 	return nil
+}
+
+func NewServer(tp transport.Transport, svc Service) natsrpc.Server {
+	return &server{
+		tp:  tp,
+		svc: svc,
+	}
 }

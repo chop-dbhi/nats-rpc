@@ -43,7 +43,7 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize a server and serve the service.
-	srv := example.NewServiceServer(tp, svc)
+	srv := example.NewServer(tp, svc)
 	if err := srv.Serve(ctx); err != nil {
 		logger.Error("serve error", zap.Error(err))
 		os.Exit(1)
