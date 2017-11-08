@@ -7,6 +7,7 @@ import (
 	"go/build"
 	"go/format"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -14,11 +15,28 @@ import (
 	"github.com/golang/protobuf/protoc-gen-go/plugin"
 )
 
+var (
+	camelRegexp = regexp.MustCompile("[A-Z][^A-Z]*")
+
+	templateFuncs = map[string]interface{}{
+		"lower": strings.ToLower,
+		"base": func(in string) string {
+			idx := strings.LastIndex(in, ".")
+			if idx == -1 {
+				return in
+			}
+			return in[idx+1:]
+		},
+		"hyphenize": func(s string) string {
+			return strings.ToLower(strings.Join(camelRegexp.FindAllString(s, -1), "-"))
+		},
+	}
+)
+
 func stringPtr(in string) *string {
 	if in == "" {
 		return nil
 	}
-
 	return &in
 }
 
@@ -61,18 +79,7 @@ func packagePath(in *descriptor.FileDescriptorProto) (string, error) {
 
 // base and lower are template helper functions.
 func newTemplate(content string) (*template.Template, error) {
-	fn := map[string]interface{}{
-		"base": func(in string) string {
-			idx := strings.LastIndex(in, ".")
-			if idx == -1 {
-				return in
-			}
-			return in[idx+1:]
-		},
-		"lower": strings.ToLower,
-	}
-
-	return template.New("page").Funcs(fn).Parse(content)
+	return template.New("page").Funcs(templateFuncs).Parse(content)
 }
 
 type service struct {

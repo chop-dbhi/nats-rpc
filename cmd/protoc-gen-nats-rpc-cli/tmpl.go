@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"{{ .PkgPath }}"
 
@@ -96,10 +97,10 @@ func main() {
 	var rep proto.Message
 	ctx := context.Background()
 
-	switch meth { {{ $Service := .Name }}{{ range .Methods }}
-	case "{{ .Name }}":
-		client := {{ $Pkg }}.New{{ $Service }}Client(tp)
-		var req {{ $Pkg }}.{{ .InputType | base }}
+	switch strings.ToLower(meth) { {{ range .Methods }}
+	case "{{ .Name|lower }}"{{ if ne (.Name|lower) (.Name|hyphenize) }}, "{{ .Name|hyphenize }}"{{ end }}:
+		client := {{ $Pkg }}.NewClient(tp)
+		var req {{ $Pkg }}.{{ .InputType|base }}
 		if err := jsonUnmarshaler.Unmarshal(inpr, &req); err != nil {
 			log.Fatalf("json: %s", err)
 		}
@@ -120,7 +121,7 @@ func main() {
 				log.Fatalf("error encoding error: %s", err)
 			}
 		}
-		os.Exit(1)
+		log.Fatal(err)
 	}
 
 	if err := jsonMarshaler.Marshal(os.Stdout, rep); err != nil {
