@@ -101,6 +101,10 @@ type Options struct {
 }
 
 func ParseOptions(p string) (*Options, error) {
+	if p == "" {
+		return &Options{}, nil
+	}
+
 	var opts Options
 
 	kvs := strings.Split(p, ",")
