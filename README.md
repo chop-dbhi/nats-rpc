@@ -11,8 +11,6 @@ Install the library and protobuf plugins.
 ```
 go get github.com/chop-dbhi/nats-rpc/...
 go get github.com/chop-dbhi/nats-rpc/cmd/protoc-gen-nats-rpc
-
-# Optional for generating a CLI.
 go get github.com/chop-dbhi/nats-rpc/cmd/protoc-gen-nats-rpc-cli
 ```
 
@@ -44,7 +42,6 @@ Then run:
 ```
 protoc --go_out=. service.proto
 protoc  --nats-rpc_out=. service.proto
-# Optional for generating a CLI.
 protoc --nats-rpc-cli_out=cmd/cli service.proto
 ```
 
@@ -64,6 +61,23 @@ In the other, try the CLI:
 go run ./cmd/cli/main.go Sum '{"left": 5, "right": 10}'
 {"sum":15}
 ```
+
+### Parameters
+
+Two parameters are supported for both commands. Parameters are supplied as a set of param-value pairs separated by commas as shown below.
+
+```
+protoc --nats-rpc_out=param1=value1,param2=value2:. service.proto
+```
+
+`subject` - A Go template string that enables customizing the generated NATS subjects per method. Supported template parameters include:
+  - `{{.Pkg}}` - The name of the package defined in the proto file.
+  - `{{.Service}}` - The name of the service type being generated for.
+  - `{{.Method}}` - The name of the method the subject corresponds to.
+
+The default subject template is `{{.Pkg}}.{{.Method}}`.
+
+`outfile` - The name of the output file.
 
 ## License
 

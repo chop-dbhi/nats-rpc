@@ -89,13 +89,53 @@ type method struct {
 	OutputType string
 }
 
-func ParseFile(in *descriptor.FileDescriptorProto, out, tmpl string) (*plugin_go.CodeGeneratorResponse_File, error) {
+type subjectParams struct {
+	Pkg     string
+	Service string
+	Method  string
+}
+
+type Options struct {
+	Subject string
+	OutFile string
+}
+
+func ParseOptions(p string) (*Options, error) {
+	var opts Options
+
+	kvs := strings.Split(p, ",")
+	for _, v := range kvs {
+		kv := strings.SplitN(v, "=", 2)
+		switch strings.ToLower(kv[0]) {
+		case "subject":
+			opts.Subject = kv[1]
+		case "outfile":
+			opts.OutFile = kv[1]
+		default:
+			return nil, fmt.Errorf("unknown param: %s", kv[0])
+		}
+	}
+
+	return &opts, nil
+}
+
+func ParseFile(in *descriptor.FileDescriptorProto, tmpl string, opts Options) (*plugin_go.CodeGeneratorResponse_File, error) {
 	if len(in.Service) != 1 {
 		return nil, errors.New("exactly one sevice must be defined")
 	}
 
-	if out == "" {
-		out = outName(in)
+	// Parse subject template.
+	if opts.Subject == "" {
+		opts.Subject = "{{.Pkg}}.{{.Method}}"
+	}
+
+	subjectTmpl, err := template.New("subject").Parse(opts.Subject)
+	if err != nil {
+		return nil, err
+	}
+
+	if opts.OutFile == "" {
+		opts.OutFile = outName(in)
 	}
 
 	pkg, err := packageName(in)
@@ -116,22 +156,35 @@ func ParseFile(in *descriptor.FileDescriptorProto, out, tmpl string) (*plugin_go
 		Name:    sp.GetName(),
 	}
 
+	buf := bytes.NewBuffer(nil)
 	for _, m := range sp.Method {
+		buf.Reset()
+		err := subjectTmpl.Execute(buf, &subjectParams{
+			Pkg:     pkg,
+			Service: sd.Name,
+			Method:  m.GetName(),
+		})
+		if err != nil {
+			return nil, err
+		}
+
 		sd.Methods = append(sd.Methods, &method{
 			Name:       m.GetName(),
-			Topic:      fmt.Sprintf("%s.%s", pkg, m.GetName()), // TODO: support alternate prefix
+			Topic:      buf.String(),
 			InputType:  m.GetInputType(),
 			OutputType: m.GetOutputType(),
 		})
 	}
 
-	buf := bytes.NewBuffer(nil)
+	buf.Reset()
 	t, err := newTemplate(tmpl)
 	if err != nil {
 		return nil, err
 	}
 
-	t.Execute(buf, sd)
+	if err := t.Execute(buf, sd); err != nil {
+		return nil, err
+	}
 
 	src, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -139,7 +192,7 @@ func ParseFile(in *descriptor.FileDescriptorProto, out, tmpl string) (*plugin_go
 	}
 
 	return &plugin_go.CodeGeneratorResponse_File{
-		Name:    stringPtr(out),
+		Name:    stringPtr(opts.OutFile),
 		Content: stringPtr(string(src)),
 	}, nil
 }

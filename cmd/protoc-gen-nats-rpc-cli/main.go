@@ -25,9 +25,18 @@ func main() {
 		log.Fatal("exactly one service proto must be defined")
 	}
 
+	opts, err := natsrpc.ParseOptions(req.GetParameter())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if opts.OutFile == "" {
+		opts.OutFile = "main.go"
+	}
+
 	pfile := req.ProtoFile[0]
 
-	file, err := natsrpc.ParseFile(pfile, "main.go", tmpl)
+	file, err := natsrpc.ParseFile(pfile, tmpl, *opts)
 	if err != nil {
 		log.Fatal(err)
 	}
