@@ -10,8 +10,6 @@ Install the library and protobuf plugins.
 
 ```
 go get github.com/chop-dbhi/nats-rpc/...
-go get github.com/chop-dbhi/nats-rpc/cmd/protoc-gen-nats-rpc
-go get github.com/chop-dbhi/nats-rpc/cmd/protoc-gen-nats-rpc-cli
 ```
 
 ## Usage
@@ -40,9 +38,11 @@ service Service {
 Then run:
 
 ```
-protoc --go_out=. service.proto
-protoc  --nats-rpc_out=. service.proto
-protoc --nats-rpc-cli_out=cmd/cli service.proto
+protoc \
+  --go_out=. \
+  --nats-rpc_out=. \
+  --nats-rpc-cli_out=cmd/cli \
+  service.proto
 ```
 
 See the [example](./example) package for the full example and generated output.
